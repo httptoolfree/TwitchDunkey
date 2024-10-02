@@ -287,11 +287,6 @@ namespace TwitchDownloaderCore
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (downloadOptions.DownloadFormat is ChatFormat.Json)
-            {
-                await BackfillUserInfo(chatRoot);
-            }
-
             _progress.SetStatus("Writing Output File");
             switch (downloadOptions.DownloadFormat)
             {
@@ -450,8 +445,6 @@ namespace TwitchDownloaderCore
             _progress.SetTemplateStatus("Downloading Embed Images {0}%", 0);
             chatRoot.embeddedData = new EmbeddedData();
 
-            // This is the exact same process as in ChatUpdater.cs but not in a task oriented manner
-            // TODO: Combine this with ChatUpdater in a different file
             List<TwitchEmote> thirdPartyEmotes = await TwitchHelper.GetThirdPartyEmotes(chatRoot.comments, chatRoot.streamer.id, downloadOptions.TempFolder, _progress, bttv: downloadOptions.BttvEmotes, ffz: downloadOptions.FfzEmotes, stv: downloadOptions.StvEmotes, cancellationToken: cancellationToken);
             _progress.ReportProgress(25);
             List<TwitchEmote> firstPartyEmotes = await TwitchHelper.GetEmotes(chatRoot.comments, downloadOptions.TempFolder, _progress, cancellationToken: cancellationToken);
@@ -540,57 +533,6 @@ namespace TwitchDownloaderCore
 
                 chatRoot.embeddedData.twitchBits.Add(newBit);
                 _progress.ReportProgress(++imagesProcessed * 100 / totalImageCount);
-            }
-        }
-
-        private async Task BackfillUserInfo(ChatRoot chatRoot)
-        {
-            // Best effort, but if we fail oh well
-            _progress.SetTemplateStatus("Backfilling Commenter Info {0}%", 0);
-
-            var userIds = chatRoot.comments.Select(x => x.commenter._id).Distinct().ToArray();
-            var userInfo = new Dictionary<string, User>(userIds.Length);
-
-            var failedInfo = false;
-            const int BATCH_SIZE = 100;
-            for (var i = 0; i < userIds.Length; i += BATCH_SIZE)
-            {
-                try
-                {
-                    var userSubset = userIds.Skip(i).Take(BATCH_SIZE);
-
-                    GqlUserInfoResponse userInfoResponse = await TwitchHelper.GetUserInfo(userSubset);
-                    foreach (var user in userInfoResponse.data.users)
-                    {
-                        userInfo[user.id] = user;
-                    }
-
-                    var percent = Math.Min(i + BATCH_SIZE, userIds.Length) * 100f / userIds.Length;
-                    _progress.ReportProgress((int)percent);
-                }
-                catch (Exception e)
-                {
-                    _progress.LogVerbose($"An error occurred while backfilling commenters {i}-{Math.Min(i + BATCH_SIZE, userIds.Length - 1)}: {e.Message}");
-                    failedInfo = true;
-                }
-            }
-
-            _progress.ReportProgress(100);
-
-            if (failedInfo)
-            {
-                _progress.LogInfo("Failed to backfill some commenter info");
-            }
-
-            foreach (var comment in chatRoot.comments)
-            {
-                if (userInfo.TryGetValue(comment.commenter._id, out var user))
-                {
-                    comment.commenter.updated_at = user.updatedAt;
-                    comment.commenter.created_at = user.createdAt;
-                    comment.commenter.bio = user.description;
-                    comment.commenter.logo = user.profileImageURL;
-                }
             }
         }
     }
